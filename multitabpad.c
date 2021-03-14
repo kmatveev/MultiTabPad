@@ -12,6 +12,7 @@
 #include <strsafe.h>
 
 #include "editor.h"  // interface between editor implementation and container window
+#include "apputils.h"
 
 #include "resource.h"
 
@@ -21,12 +22,19 @@ wchar_t mainWindowTitle[512];
 
 HWND g_mainWindowHandle;
 
-int g_tabWindowIdentifier = 3000; // just some value which I've chosen. This value is passed as param to CreateWindow for tabCtrl, and will be returned in WM_NOTIFY messages
-int tabIncrementor = 0;
-HWND g_tabCtrlWinHandle;
-HMENU g_tabMenuHandle;
-LOGFONT g_editorFontProperties;
-HFONT g_editorFontHandle;
+// will use this structure to group fields which describe tab header and editor
+struct TabEditorsInfo {
+    int tabWindowIdentifier;
+    int tabIncrementor;
+    HWND parentWinHandle;
+    HWND tabCtrlWinHandle;
+    HMENU tabMenuHandle;
+    LOGFONT editorFontProperties;
+    HFONT editorFontHandle;
+  };
+
+// single global instance of TabEditorsInfo
+struct TabEditorsInfo g_tabEditorsInfo;
 
 HWND g_findReplaceDialogHandle;
 // content of find string is persisted between find attempts
@@ -40,21 +48,22 @@ wchar_t fontPropertyVal[LF_FACESIZE];
 void defaultApplicationConfig();
 void readApplicationConfig();
 LRESULT CALLBACK WinProc(HWND hWind, UINT msg, WPARAM wParam, LPARAM lParam);
-HWND createTabControl(HWND hwndParent, int tabWindowIdentifier);
+HWND createTabControl(struct TabEditorsInfo *tabEditorsInfo, HWND parentWinHandle);
 void createTab(HWND tabCtrlWinHandle, int suffix, int index);
-void createTabWithEditor(HWND tabCtrlWinHandle, HFONT editorFontHandle, BOOL visible);
-void removeTabWithEditor(HWND tabCtrlWinHandle, int i, HFONT g_editorFontHandle);
+void createTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, BOOL visible);
+void removeTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, int i);
 HWND getEditorForTabItem(HWND tabCtrlWinHandle, int i);
 wchar_t* getFilenameForTabItem(HWND tabCtrlWinHandle, int i);
 void showEditorForSelectedTabItem(HWND tabCtrlWinHandle, int selected);
+HWND getEditorForCurrentTab(struct TabEditorsInfo *tabEditorsInfo);
 void setFileForTabItem(HWND tabCtrlWinHandle, int tabIndex, wchar_t* heapAllocatedFileName);
 LRESULT processTabNotification(HWND tabCtrlWinHandle, HMENU tabMenuHandle, HWND menuCommandProcessorWindowHandle, int code);
 LRESULT processEditorNotification(HWND editorWinHandle, LPNMHDR nmhdr);
-HRESULT resizeTabControl(HWND tabCtrlWinHandle, RECT rc);
+HRESULT resizeTabControl(struct TabEditorsInfo* tabEditorsInfo, RECT rc);
 BOOL setEditorPos(HWND editorWinHandle, RECT rectangle);
 void selectTab(HWND tabCtrlWinHandle, int i);
 
-void chooseFont(HWND topLevelWindowHandle, HWND tabCtrlWinHandle);
+void chooseFont(HWND topLevelWindowHandle, struct TabEditorsInfo* tabEditorsInfo);
 void applyFontToAllEditors(HWND tabCtrlWinHandle, HFONT newFontHandle);
 void fileSave(HWND editorWinHandle, wchar_t* prevFileName);
 wchar_t* fileSaveAs(HWND topLevelWindowHandle, HWND editorWinHandle, wchar_t* prevFileName);
@@ -148,40 +157,11 @@ void defaultApplicationConfig() {
 
 void readApplicationConfig() {
 
-    char appModuleFilename[MAX_PATH];
-    char appConfigFilename[MAX_PATH];
-    HRESULT result;
-    HANDLE configFileHandle;
-    int configFileSize, bytesRead;
+    UINT codePage = CP_ACP; // ANSI code page
+    char* fontPropertyStart, * fontPropertyEnd;
     BYTE* configFileContentBuffer;
-    UINT codePage;
-    char *fontPropertyStart, *fontPropertyEnd;
 
-    // here we deliberatelly use byte-oriented functions
-
-    // NULL means "module of current process"
-    GetModuleFileNameA(NULL, appModuleFilename, MAX_PATH);
-    result = StringCchCopyA(appConfigFilename, MAX_PATH, appModuleFilename); // TODO check result
-    PathRemoveFileSpecA(appConfigFilename);
-    PathAppendA(appConfigFilename, "defaults.ini");
-
-    configFileHandle = CreateFileA(appConfigFilename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    if (configFileHandle == INVALID_HANDLE_VALUE) {
-        return FALSE;
-    }
-
-    // Get file size in bytes and allocate memory for read.
-    // Add an extra two bytes for zero termination.
-    configFileSize = GetFileSize(configFileHandle, NULL);
-    configFileContentBuffer = HeapAlloc(GetProcessHeap(), 0, configFileSize + 1);
-
-    // Read file and put terminating zeros at end.
-    // TODO check if whole file was read
-    ReadFile(configFileHandle, configFileContentBuffer, configFileSize, &bytesRead, NULL);
-    CloseHandle(configFileHandle);
-    configFileContentBuffer[configFileSize] = '\0';
-
-    codePage = CP_ACP; // ANSI code page
+    configFileContentBuffer = readConfigFile();
 
     fontPropertyStart = StrStrA(configFileContentBuffer, "Font=");
     if (fontPropertyStart != NULL) {
@@ -189,7 +169,7 @@ void readApplicationConfig() {
         fontPropertyEnd = StrChrA(fontPropertyStart, '\r');
         if (fontPropertyEnd != NULL) {
             MultiByteToWideChar(codePage, 0, fontPropertyStart, -1, fontPropertyVal, fontPropertyEnd - fontPropertyStart);
-        } else {
+        }  else {
             // TODO support last lines in fine which don't end with \r
         }
     }
@@ -210,31 +190,33 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
 
             // here we specify default properties of font shared by all editor instances
             // these could be later changed via "Choose font" dialog
-            g_editorFontProperties.lfHeight = -17; // this height seems fine
-            g_editorFontProperties.lfWidth = 0;
-            g_editorFontProperties.lfEscapement = 0;
-            g_editorFontProperties.lfOrientation = 0;
-            g_editorFontProperties.lfWeight = FW_NORMAL;
-            g_editorFontProperties.lfItalic = FALSE;
-            g_editorFontProperties.lfUnderline = FALSE;
-            g_editorFontProperties.lfStrikeOut = FALSE;
-            g_editorFontProperties.lfCharSet = ANSI_CHARSET;
-            g_editorFontProperties.lfOutPrecision = OUT_DEFAULT_PRECIS;
-            g_editorFontProperties.lfClipPrecision = CLIP_DEFAULT_PRECIS;
-            g_editorFontProperties.lfQuality = DEFAULT_QUALITY;
-            g_editorFontProperties.lfPitchAndFamily = DEFAULT_PITCH;
-            wcscpy(g_editorFontProperties.lfFaceName, fontPropertyVal);
-            g_editorFontHandle = CreateFontIndirectW(&g_editorFontProperties);
+            g_tabEditorsInfo.editorFontProperties.lfHeight = -17; // this height seems fine
+            g_tabEditorsInfo.editorFontProperties.lfWidth = 0;
+            g_tabEditorsInfo.editorFontProperties.lfEscapement = 0;
+            g_tabEditorsInfo.editorFontProperties.lfOrientation = 0;
+            g_tabEditorsInfo.editorFontProperties.lfWeight = FW_NORMAL;
+            g_tabEditorsInfo.editorFontProperties.lfItalic = FALSE;
+            g_tabEditorsInfo.editorFontProperties.lfUnderline = FALSE;
+            g_tabEditorsInfo.editorFontProperties.lfStrikeOut = FALSE;
+            g_tabEditorsInfo.editorFontProperties.lfCharSet = ANSI_CHARSET;
+            g_tabEditorsInfo.editorFontProperties.lfOutPrecision = OUT_DEFAULT_PRECIS;
+            g_tabEditorsInfo.editorFontProperties.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+            g_tabEditorsInfo.editorFontProperties.lfQuality = DEFAULT_QUALITY;
+            g_tabEditorsInfo.editorFontProperties.lfPitchAndFamily = DEFAULT_PITCH;
+            wcscpy(g_tabEditorsInfo.editorFontProperties.lfFaceName, fontPropertyVal);
+            g_tabEditorsInfo.editorFontHandle = CreateFontIndirectW(&(g_tabEditorsInfo.editorFontProperties));
 
-            g_tabCtrlWinHandle = createTabControl(windowHandle, g_tabWindowIdentifier);
-            g_tabMenuHandle = LoadMenuW(g_appModuleHandle, MAKEINTRESOURCEW(IDM_TABMENU));
-            g_tabMenuHandle = GetSubMenu(g_tabMenuHandle, 0); // we can't show top-level menu, we must use PopupMenu, which is a single child of this menu
+            createTabControl(&g_tabEditorsInfo, windowHandle);
 
-            if (g_tabCtrlWinHandle == NULL) {
+            if (g_tabEditorsInfo.tabCtrlWinHandle == NULL) {
                 MessageBoxW(NULL, L"Error while creating main application window: could not create tab control", L"Note", MB_OK);
             } else {
+
+                g_tabEditorsInfo.tabMenuHandle = LoadMenuW(g_appModuleHandle, MAKEINTRESOURCEW(IDM_TABMENU));
+                g_tabEditorsInfo.tabMenuHandle = GetSubMenu(g_tabEditorsInfo.tabMenuHandle, 0); // we can't show top-level menu, we must use PopupMenu, which is a single child of this menu
+
                 // we want a single tab to be present in new window
-                createTabWithEditor(g_tabCtrlWinHandle, g_editorFontHandle, TRUE);
+                createTabWithEditor(&g_tabEditorsInfo, TRUE);
             }
             return 0;
         case WM_DESTROY:
@@ -242,19 +224,18 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
             return 0;
         case WM_SIZE: {
             RECT rc;
-            // WM_SIZE params contain width and height of main window client area
+            // WM_SIZE params contain width and height of main window's client area
             // Since client area's left and top coordinates are both 0, having width and height gives us absolute coordinates of client's area
             SetRect(&rc, 0, 0, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            resizeTabControl(g_tabCtrlWinHandle, rc);
+            resizeTabControl(&g_tabEditorsInfo, rc);
             return 0;
         }
         case WM_SETFOCUS: {
-            SetFocus(getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle)));
+            SetFocus(getEditorForCurrentTab(&g_tabEditorsInfo));
             return 0;
         }
         case WM_INITMENUPOPUP: {
-            int currentTab = TabCtrl_GetCurSel(g_tabCtrlWinHandle);
-            HWND activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, currentTab);
+            HWND activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
             int selectionBegin, selectionEnd, enableCutCopy, enableFind;
             switch (lParam) {
                 case 1:  {           // Edit menu
@@ -288,15 +269,15 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
         case WM_COMMAND:
             switch (LOWORD(wParam)) {
                 case ID_FILE_NEW:
-                    createTabWithEditor(g_tabCtrlWinHandle, g_editorFontHandle, FALSE);
+                    createTabWithEditor(&g_tabEditorsInfo, FALSE);
                     return 0;
                 case ID_FILE_EXIT: {
-                    int tabItemsCount = TabCtrl_GetItemCount(g_tabCtrlWinHandle);
+                    int tabItemsCount = TabCtrl_GetItemCount(g_tabEditorsInfo.tabCtrlWinHandle);
                     BOOL haveUnsavedEditors = FALSE;
                     HWND editorHandle;
                     int sureToExitResponse;
                     for (int i = 0; i < tabItemsCount; i++) {
-                        editorHandle = getEditorForTabItem(g_tabCtrlWinHandle, i);
+                        editorHandle = getEditorForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, i);
                         haveUnsavedEditors = haveUnsavedEditors | SendMessageW(editorHandle, EM_GETMODIFY, 0, 0);
                     }
                     if (haveUnsavedEditors) {
@@ -312,15 +293,15 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                 case ID_FILE_SAVE: {
                     HWND activeEditorWinHandle;
                     wchar_t* heapAllocatedFileName;
-                    int currentTab = TabCtrl_GetCurSel(g_tabCtrlWinHandle);
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, currentTab);
-                    heapAllocatedFileName = getFilenameForTabItem(g_tabCtrlWinHandle, currentTab); // this will be NULL if tab content was never saved
+                    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
+                    heapAllocatedFileName = getFilenameForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab); // this will be NULL if tab content was never saved
                     if (heapAllocatedFileName != NULL) {
                         fileSave(activeEditorWinHandle, heapAllocatedFileName);
                     } else {
                         heapAllocatedFileName = fileSaveAs(windowHandle, activeEditorWinHandle, heapAllocatedFileName);
                         if (heapAllocatedFileName != NULL) {
-                            setFileForTabItem(g_tabCtrlWinHandle, currentTab, heapAllocatedFileName);
+                            setFileForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab, heapAllocatedFileName);
                         }
                     }
                     return 0;
@@ -328,12 +309,12 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                 case ID_FILE_SAVEAS: {
                     HWND activeEditorWinHandle;
                     wchar_t* heapAllocatedFileName;
-                    int currentTab = TabCtrl_GetCurSel(g_tabCtrlWinHandle);
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, currentTab);
-                    heapAllocatedFileName = getFilenameForTabItem(g_tabCtrlWinHandle, currentTab); // this will be NULL if tab content was never saved
+                    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
+                    heapAllocatedFileName = getFilenameForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab); // this will be NULL if tab content was never saved
                     heapAllocatedFileName = fileSaveAs(windowHandle, activeEditorWinHandle, heapAllocatedFileName);
                     if (heapAllocatedFileName != NULL) {
-                        setFileForTabItem(g_tabCtrlWinHandle, currentTab, heapAllocatedFileName);
+                        setFileForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab, heapAllocatedFileName);
                     }
                     return 0;
                 }
@@ -341,16 +322,16 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                     HWND activeEditorWinHandle;
                     wchar_t* heapAllocatedFileName;
                     int tabs, currentTab, createdTab;
-                    tabs = TabCtrl_GetItemCount(g_tabCtrlWinHandle);
-                    currentTab = TabCtrl_GetCurSel(g_tabCtrlWinHandle);
-                    wchar_t* file = getFilenameForTabItem(g_tabCtrlWinHandle, currentTab);
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, createdTab);
+                    tabs = TabCtrl_GetItemCount(g_tabEditorsInfo.tabCtrlWinHandle);
+                    currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+                    wchar_t* file = getFilenameForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab);
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     BOOL isModified = SendMessageW(activeEditorWinHandle, EM_GETMODIFY, 0, 0);
                     if ((tabs > 1) || (file != NULL) || (isModified)) {
                         // files are opened in new tabs
-                        createTabWithEditor(g_tabCtrlWinHandle, g_editorFontHandle, TRUE);
-                        createdTab = TabCtrl_GetCurSel(g_tabCtrlWinHandle);
-                        activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, createdTab);
+                        createTabWithEditor(&g_tabEditorsInfo, TRUE);
+                        createdTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+                        activeEditorWinHandle = getEditorForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, createdTab);
                     } else {
                         // if there were a single empty tab, reuse it
                         createdTab = currentTab;
@@ -358,10 +339,10 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                     // now, when tab was created and activated, we can load data from file
                     heapAllocatedFileName = fileOpen(windowHandle,activeEditorWinHandle);
                     if (heapAllocatedFileName != NULL) {
-                        setFileForTabItem(g_tabCtrlWinHandle, createdTab, heapAllocatedFileName);
+                        setFileForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, createdTab, heapAllocatedFileName);
                     } else if (createdTab != currentTab) {
-                        removeTabWithEditor(g_tabCtrlWinHandle, createdTab, g_editorFontHandle);
-                        selectTab(g_tabCtrlWinHandle, currentTab);
+                        removeTabWithEditor(&g_tabEditorsInfo, createdTab);
+                        selectTab(g_tabEditorsInfo.tabCtrlWinHandle, currentTab);
                     }
                     return 0;
                 }
@@ -372,66 +353,66 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                     int saveYesNoCancel;
                     BOOL saveOk;
                     wchar_t* fileName;
-                    int currentTab = TabCtrl_GetCurSel(g_tabCtrlWinHandle);
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, currentTab);
+                    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     isModified = SendMessageW(activeEditorWinHandle, EM_GETMODIFY, 0, 0);
                     if (isModified) {
                         saveYesNoCancel = MessageBoxW(windowHandle, L"Content has been modified, do you want to save it?", L"Note", MB_YESNOCANCEL);
                         if (saveYesNoCancel == IDYES) {
-                            fileName = getFilenameForTabItem(g_tabCtrlWinHandle, currentTab);
+                            fileName = getFilenameForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab);
                             if (fileName != NULL) {
                                 fileSave(activeEditorWinHandle, fileName);
-                                removeTabWithEditor(g_tabCtrlWinHandle, currentTab, g_editorFontHandle);
+                                removeTabWithEditor(&g_tabEditorsInfo, currentTab);
                             } else {
                                 fileName = fileSaveAs(windowHandle, activeEditorWinHandle, fileName);
                                 if (fileName != NULL) {
                                     // no real point to perist filename into tab data, since tab will be removed,
                                     // but to avoid memory leak we must either put this filename into tab data, so it is released by removeTab(), or just free this memory
-                                    setFileForTabItem(g_tabCtrlWinHandle, currentTab, fileName);
-                                    removeTabWithEditor(g_tabCtrlWinHandle, currentTab, g_editorFontHandle);
+                                    setFileForTabItem(g_tabEditorsInfo.tabCtrlWinHandle, currentTab, fileName);
+                                    removeTabWithEditor(&g_tabEditorsInfo, currentTab);
                                 }
                             }
                             return 0;
                         } else if (saveYesNoCancel == IDNO) {
                             // User chose "NO", so don't save, just close active editor
-                            removeTabWithEditor(g_tabCtrlWinHandle, currentTab, g_editorFontHandle);
+                            removeTabWithEditor(&g_tabEditorsInfo, currentTab);
                             return 0;
                         } else {
                             // User chose "CANCEL", don't do anything
                             return 0;
                         }
                     } else {
-                        removeTabWithEditor(g_tabCtrlWinHandle, currentTab, g_editorFontHandle);
+                        removeTabWithEditor(&g_tabEditorsInfo, currentTab);
                         return 0;
                     }
                 }
                 case ID_EDIT_UNDO: {
                     HWND activeEditorWinHandle;
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     SendMessageW(activeEditorWinHandle, EM_UNDO, 0, 0L);
                     return 0L;
                 }
                 case ID_EDIT_CUT: {
                     HWND activeEditorWinHandle;
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     SendMessageW(activeEditorWinHandle, WM_CUT, 0, 0L);
                     return 0L;
                 }
                 case ID_EDIT_COPY: {
                     HWND activeEditorWinHandle;
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     SendMessageW(activeEditorWinHandle, WM_COPY, 0, 0L);
                     return 0L;
                 }
                 case ID_EDIT_PASTE: {
                     HWND activeEditorWinHandle;
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     SendMessageW(activeEditorWinHandle, WM_PASTE, 0, 0L);
                     return 0L;
                 }
                 case ID_EDIT_DELETE: {
                     HWND activeEditorWinHandle;
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     SendMessageW(activeEditorWinHandle, WM_CLEAR, 0, 0L);
                     return 0L;
                 }
@@ -439,7 +420,7 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                     CHARRANGE charr;
                     HWND activeEditorWinHandle;
 
-                    activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
  
                     charr.cpMin = 0;
                     charr.cpMax = -1;
@@ -453,7 +434,7 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                 }
                 case ID_SEARCH_FINDNEXT: {
                     int searchPosition;
-                    HWND activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    HWND activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     if (*g_findText != L'\0') {
                         SendMessageW(activeEditorWinHandle, EM_GETSEL, 0, (LPARAM)&searchPosition);
                         findText(activeEditorWinHandle, &searchPosition, g_findText);
@@ -463,12 +444,12 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                     return 0;
                 }
                 case ID_SEARCH_REPLACE: {
-                    HWND activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                    HWND activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
                     g_findReplaceDialogHandle = showFindReplaceDialog(windowHandle, g_findText, sizeof(g_findText) / sizeof(wchar_t), g_replText, sizeof(g_replText)/sizeof(wchar_t));
                     return 0;
                 }
                 case ID_FORMAT_FONT: {
-                    chooseFont(g_mainWindowHandle, g_tabCtrlWinHandle);
+                    chooseFont(g_mainWindowHandle, &g_tabEditorsInfo);
                     return 0L;
                 }
                 case ID_HELP_ABOUT: {
@@ -487,12 +468,12 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
           // Notifications are sent from TabControl window to it's parent window, so windowHandle will be a handle of parent window.
           // To indentify a source of a message, we should use nmhdr->hwndFrom
           LPNMHDR lpnmh = (LPNMHDR) lParam;
-          if (lpnmh->hwndFrom == g_tabCtrlWinHandle) {
+          if (lpnmh->hwndFrom == g_tabEditorsInfo.tabCtrlWinHandle) {
               // wsprintf(buf, L"Notification for %d, %d", wParam, lpnmh->idFrom); 
               // MessageBox(NULL, buf, L"Note", MB_OK);
-              return processTabNotification(g_tabCtrlWinHandle, g_tabMenuHandle, g_mainWindowHandle, lpnmh->code);
+              return processTabNotification(g_tabEditorsInfo.tabCtrlWinHandle, g_tabEditorsInfo.tabMenuHandle, g_mainWindowHandle, lpnmh->code);
           } else {
-              activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+              activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
               if (lpnmh->hwndFrom == activeEditorWinHandle) {
                   // wsprintf(buf, L"Editor notification for %d, %d", wParam, lpnmh->idFrom); 
                   // MessageBox(NULL, buf, L"Note", MB_OK);
@@ -514,7 +495,7 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
             int searchPosition;
             // Here we process messages from "Find/Replace" dialog which use generated message id
             if (msg == messageFromFindDialog) {
-                activeEditorWinHandle = getEditorForTabItem(g_tabCtrlWinHandle, TabCtrl_GetCurSel(g_tabCtrlWinHandle));
+                activeEditorWinHandle = getEditorForCurrentTab(&g_tabEditorsInfo);
 
                 pfr = (LPFINDREPLACEW)lParam;
 
@@ -555,16 +536,22 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
 // Returns the handle to the tab control. 
 // parentWinHandle - parent window (the application's main window). 
 // 
-HWND createTabControl(HWND parentWinHandle, int tabWindowIdentifier) {
+HWND createTabControl(struct TabEditorsInfo *tabEditorsInfo, HWND parentWinHandle) {
  
     HWND tabCtrlWinHandle; 
     LOGFONTW tabCaptionFont;
-    HFONT tabCaptionFontHandle;
+    HFONT tabCaptionFontHandle;  // consider exposing this to TabEditorsInfo
+
+    tabEditorsInfo->tabWindowIdentifier = 3000;  // just some value which I've chosen. This value is passed as param to CreateWindow for tabCtrl, and will be returned in WM_NOTIFY messages
+    tabEditorsInfo->tabIncrementor = 0;
+
+    tabEditorsInfo->parentWinHandle = parentWinHandle;
     
-    tabCtrlWinHandle = CreateWindowW(WC_TABCONTROL, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, parentWinHandle, tabWindowIdentifier, g_appModuleHandle, NULL);
+    tabCtrlWinHandle = CreateWindowW(WC_TABCONTROL, L"", WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, parentWinHandle, tabEditorsInfo->tabWindowIdentifier, g_appModuleHandle, NULL);
     if (tabCtrlWinHandle == NULL) { 
         return NULL; // Error happened, and we don't handle it here, invoker should call GetLastError()
     }
+    tabEditorsInfo->tabCtrlWinHandle = tabCtrlWinHandle;
 
     // We are going to store custom application data associated with each tab item. To achieve that, we need to specify once how many bytes do we need for app data
     TabCtrl_SetItemExtra(tabCtrlWinHandle, sizeof(TCCUSTOMITEM) - sizeof(TCITEMHEADER));
@@ -611,18 +598,20 @@ void createTab(HWND tabCtrlWinHandle, int suffix, int index) {
 
 }
 
-void createTabWithEditor(HWND tabCtrlWinHandle, HFONT editorFontHandle, BOOL visible) {
+void createTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, BOOL visible) {
 
     RECT rc;
     POINT p;
     TCCUSTOMITEM tabCtrlItemInfo;
     int newTabIndex;
-    HWND editWinHandle;
+    HWND editWinHandle, tabCtrlWinHandle;
+
+    tabCtrlWinHandle = tabEditorsInfo->tabCtrlWinHandle;
 
     newTabIndex = TabCtrl_GetItemCount(tabCtrlWinHandle);
-    createTab(tabCtrlWinHandle, tabIncrementor, newTabIndex);  // we use num of current tabs as a suffix for default tab name
-    editWinHandle = createEditorWindow(g_appModuleHandle, tabCtrlWinHandle, tabIncrementor == 0);
-    SendMessageW(editWinHandle, WM_SETFONT, (WPARAM)editorFontHandle, 0);
+    createTab(tabCtrlWinHandle, tabEditorsInfo->tabIncrementor, newTabIndex);  // we use num of current tabs as a suffix for default tab name
+    editWinHandle = createEditorWindow(g_appModuleHandle, tabEditorsInfo->parentWinHandle, tabEditorsInfo->tabIncrementor == 0);
+    SendMessageW(editWinHandle, WM_SETFONT, (WPARAM)(tabEditorsInfo->editorFontHandle), 0);
 
     if (editWinHandle == NULL) {
         MessageBoxW(NULL, L"Could not create edit window", L"Note", MB_OK);
@@ -635,22 +624,20 @@ void createTabWithEditor(HWND tabCtrlWinHandle, HFONT editorFontHandle, BOOL vis
         tabCtrlItemInfo.fileName = NULL;
         TabCtrl_SetItem(tabCtrlWinHandle, newTabIndex, &tabCtrlItemInfo);
 
-        // since editor is a child of tab control, we should calculate it's size relative to tab control's client area
-        // also since tab control is a child window itself (no self menu, no self border, ...) so it's client area corresponds to whole tab control window
-        GetClientRect(tabCtrlWinHandle, &rc);
-
+        GetClientRect(tabEditorsInfo->parentWinHandle, &rc);
         TabCtrl_AdjustRect(tabCtrlWinHandle, FALSE, &rc);
         setEditorPos(editWinHandle, rc);
 
         // newly created tab will become active
         selectTab(tabCtrlWinHandle, newTabIndex);
     }
-    tabIncrementor++;
+    (tabEditorsInfo->tabIncrementor)++;
 }
 
-void removeTabWithEditor(HWND tabCtrlWinHandle, int i, HFONT editorFontHandle) {
+void removeTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, int i) {
     int newTabItemsCount;
     int newSelectedTab;
+    HWND tabCtrlWinHandle = tabEditorsInfo->tabCtrlWinHandle;
 
     // we should release those resouces associated with tab, so first we get references
     HWND editorWinHandle = getEditorForTabItem(tabCtrlWinHandle, i);
@@ -666,7 +653,7 @@ void removeTabWithEditor(HWND tabCtrlWinHandle, int i, HFONT editorFontHandle) {
     newTabItemsCount = TabCtrl_GetItemCount(tabCtrlWinHandle);
 
     if (newTabItemsCount == 0) {
-        createTabWithEditor(tabCtrlWinHandle, editorFontHandle, TRUE);
+        createTabWithEditor(tabEditorsInfo, TRUE);
     } else {
         // if last item was removed, select previous item, otherwise select next item
         newSelectedTab = (i == newTabItemsCount) ? (i - 1) : i;
@@ -695,6 +682,11 @@ HWND getEditorForTabItem(HWND tabCtrlWinHandle, int i) {
      return tabCtrlItemInfo.editorWindowHandle;
 }
 
+HWND getEditorForCurrentTab(struct TabEditorsInfo *tabEditorsInfo) {
+    HWND tabCtrlWinHandle = tabEditorsInfo->tabCtrlWinHandle;
+    getEditorForTabItem(tabCtrlWinHandle, TabCtrl_GetCurSel(tabCtrlWinHandle));
+}
+
 void selectTab(HWND tabCtrlWinHandle, int tabIndex) {
     TabCtrl_SetCurSel(tabCtrlWinHandle, tabIndex);
     showEditorForSelectedTabItem(tabCtrlWinHandle, tabIndex);
@@ -702,28 +694,25 @@ void selectTab(HWND tabCtrlWinHandle, int tabIndex) {
 
 // Resize tab container so it fits provided RECT
 // RECT is specified in parent window's client coordinates
-HRESULT resizeTabControl(HWND tabCtrlWinHandle, RECT rc)
-{
+HRESULT resizeTabControl(struct TabEditorsInfo *tabEditorsInfo, RECT rc) {
     int numTabs, i;
 
-    HWND richEditWinHandle;
+    HWND editorWinHandle;
+    RECT editorRectangle = rc;  // initilize with total area of tab ctrl and editors
     // TCHAR debugStr[256];
 
-    if (tabCtrlWinHandle == NULL) {
-        return E_INVALIDARG;
-    }
+    HWND tabCtrlWinHandle = tabEditorsInfo->tabCtrlWinHandle;
+    TabCtrl_AdjustRect(tabCtrlWinHandle, FALSE, &editorRectangle); // values in editorRectangle are updated with dimensions of display area of tabCtrl
 
     // Resize the tab control
-     if (!SetWindowPos(tabCtrlWinHandle, HWND_TOP, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_DEFERERASE | SWP_NOREPOSITION | SWP_NOOWNERZORDER))
+     if (!SetWindowPos(tabCtrlWinHandle, HWND_TOP, rc.left, rc.top, rc.right - rc.left, editorRectangle.top - rc.top, SWP_DEFERERASE | SWP_NOREPOSITION | SWP_NOOWNERZORDER))
         return E_FAIL;
-
-     TabCtrl_AdjustRect(tabCtrlWinHandle, FALSE, &rc); // values in rc are updated with dimensions of display area of tabCtrl
 
      numTabs = TabCtrl_GetItemCount(tabCtrlWinHandle);
 
      for(i = 0; i < numTabs; i++) {
-         richEditWinHandle = getEditorForTabItem(tabCtrlWinHandle, i);
-         setEditorPos(richEditWinHandle, rc);
+         editorWinHandle = getEditorForTabItem(tabCtrlWinHandle, i);
+         setEditorPos(editorWinHandle, editorRectangle);
      }
 
     return S_OK;
@@ -833,7 +822,9 @@ LRESULT processEditorNotification(HWND editorWinHandle, LPNMHDR nmhdr) {
     return 0;
 }
 
-void chooseFont(HWND topLevelWindowHandle, HWND tabCtrlWinHandle) {
+void chooseFont(HWND topLevelWindowHandle, struct TabEditorsInfo *tabEditorsInfo) {
+
+    HWND tabCtrlWinHandle = tabEditorsInfo->tabCtrlWinHandle;
     CHOOSEFONTW cf;
     BOOL chooseFontResult;
     HFONT newFontHandle;
@@ -841,7 +832,7 @@ void chooseFont(HWND topLevelWindowHandle, HWND tabCtrlWinHandle) {
     cf.lStructSize = sizeof(CHOOSEFONTW);
     cf.hwndOwner = topLevelWindowHandle;
     cf.hDC = NULL;
-    cf.lpLogFont = &g_editorFontProperties;
+    cf.lpLogFont = &(tabEditorsInfo->editorFontProperties);
     cf.iPointSize = 0;
     cf.Flags = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_EFFECTS;
     cf.rgbColors = 0;
@@ -857,10 +848,10 @@ void chooseFont(HWND topLevelWindowHandle, HWND tabCtrlWinHandle) {
     chooseFontResult = ChooseFontW(&cf);
 
     if (chooseFontResult) {
-        newFontHandle = CreateFontIndirectW(&g_editorFontProperties);
+        newFontHandle = CreateFontIndirectW(&(tabEditorsInfo->editorFontProperties));
         applyFontToAllEditors(tabCtrlWinHandle, newFontHandle);
-        DeleteObject(g_editorFontHandle);
-        g_editorFontHandle = newFontHandle;
+        DeleteObject(tabEditorsInfo->editorFontHandle);
+        tabEditorsInfo->editorFontHandle = newFontHandle;
     }
 
 }

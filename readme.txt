@@ -8,9 +8,9 @@ If you are using Microsoft Visual C compiler:
 
 rc.exe multitabpad.rc
 If you want to use basic plain text editor control:
-cl multitabpad.c basiceditor.c user32.lib comctl32.lib comdlg32.lib gdi32.lib shlwapi.lib advapi32.lib multitabpad.res
+cl multitabpad.c basiceditor.c apputils.c user32.lib comctl32.lib comdlg32.lib gdi32.lib shlwapi.lib advapi32.lib multitabpad.res
 If you want to use RichEdit control:
-cl multitabpad.c rtfeditor.c user32.lib comctl32.lib comdlg32.lib gdi32.lib shlwapi.lib advapi32.lib multitabpad.res
+cl multitabpad.c rtfeditor.c apputils.c user32.lib comctl32.lib comdlg32.lib gdi32.lib shlwapi.lib advapi32.lib multitabpad.res
 
 
 Things to do:
