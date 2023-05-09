@@ -1,6 +1,8 @@
 #include <windows.h>
-#include <richedit.h>
 #include "editor.h"
+
+#define UNICODE
+#define _UNICODE
 
 void initEditor() {
     // nothing special is needed for basic editor

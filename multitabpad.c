@@ -52,6 +52,11 @@ HWND createTabControl(struct TabEditorsInfo *tabEditorsInfo, HWND parentWinHandl
 void createTab(HWND tabCtrlWinHandle, int suffix, int index);
 void createTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, BOOL visible);
 void removeTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, int i);
+void moveTabWithEditor(struct TabEditorsInfo* tabEditorsInfo, int tabIndex, int newPosition);
+void selectedTabToRightmost();
+void selectedTabToRight();
+void selectedTabToLeftmost();
+void selectedTabToLeft();
 HWND getEditorForTabItem(HWND tabCtrlWinHandle, int i);
 wchar_t* getFilenameForTabItem(HWND tabCtrlWinHandle, int i);
 void showEditorForSelectedTabItem(HWND tabCtrlWinHandle, int selected);
@@ -425,7 +430,8 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                     charr.cpMin = 0;
                     charr.cpMax = -1;
 
-                    SendMessageW(activeEditorWinHandle, EM_EXSETSEL, 0, (LPARAM)&charr);
+                    // SendMessageW(activeEditorWinHandle, EM_EXSETSEL, 0, (LPARAM)&charr);
+                    SendMessageW(activeEditorWinHandle, EM_SETSEL, (WPARAM)charr.cpMin, (LPARAM)charr.cpMax); // works for both basic and rich editors
                     return 0L;
                 }
                 case ID_SEARCH_FIND: {
@@ -455,6 +461,22 @@ LRESULT CALLBACK WinProc(HWND windowHandle, UINT msg, WPARAM wParam, LPARAM lPar
                 case ID_HELP_ABOUT: {
                     MessageBoxW(g_mainWindowHandle, L"MultiTabPad by kmatveev", L"MultiTabPad", MB_OK | MB_ICONINFORMATION);
                     return 0L;
+                }
+                case ID_TAB_MOVETOLEFT: {
+                    selectedTabToLeft();
+                    return 0;
+                }
+                case ID_TAB_MOVETOLEFTMOST: {
+                    selectedTabToLeftmost();
+                    return 0;
+                }
+                case ID_TAB_MOVETORIGHT: {
+                    selectedTabToRight();
+                    return 0;
+                }
+                case ID_TAB_MOVETORIGHTMOST: {
+                    selectedTabToRightmost();
+                    return 0;
                 }
 
                 default:
@@ -662,6 +684,58 @@ void removeTabWithEditor(struct TabEditorsInfo *tabEditorsInfo, int i) {
     
 }
 
+void moveTabWithEditor(struct TabEditorsInfo* tabEditorsInfo, int tabIndex, int newPosition) {
+
+    HWND tabCtrlWinHandle = tabEditorsInfo->tabCtrlWinHandle;
+    TCCUSTOMITEM tabCtrlItemInfo;
+    wchar_t tabNameBuf[512];  // Temporary buffer for strings.
+    tabCtrlItemInfo.tcitemheader.pszText = &tabNameBuf; 
+    tabCtrlItemInfo.tcitemheader.cchTextMax = sizeof(tabNameBuf)/sizeof(wchar_t);
+
+    // we want to get a copy of all the info for tab, so we need to specify all info item keys here
+    tabCtrlItemInfo.tcitemheader.mask = TCIF_IMAGE | TCIF_PARAM | TCIF_RTLREADING | TCIF_STATE | TCIF_TEXT;
+    // retrieve information about tab control item with tabIndex
+    TabCtrl_GetItem(tabCtrlWinHandle, tabIndex, &tabCtrlItemInfo);
+    // delete item on old position
+    TabCtrl_DeleteItem(tabCtrlWinHandle, tabIndex);
+    // insert new tab item into specified location
+    TabCtrl_InsertItem(tabCtrlWinHandle, newPosition, &tabCtrlItemInfo); // content of tabControlItemInfo will be copied 
+    selectTab(tabCtrlWinHandle, newPosition);
+
+}
+
+void selectedTabToRightmost() {
+    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+    int newTabItemsCount = TabCtrl_GetItemCount(g_tabEditorsInfo.tabCtrlWinHandle);
+    if (currentTab < newTabItemsCount - 1) {
+        moveTabWithEditor(&g_tabEditorsInfo, currentTab, newTabItemsCount - 1);
+    }
+}
+
+void selectedTabToRight() {
+    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+    int newTabItemsCount = TabCtrl_GetItemCount(g_tabEditorsInfo.tabCtrlWinHandle);
+    if (currentTab < newTabItemsCount - 1) {
+        moveTabWithEditor(&g_tabEditorsInfo, currentTab, currentTab + 1);
+    }
+}
+
+void selectedTabToLeftmost() {
+    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+    int newTabItemsCount = TabCtrl_GetItemCount(g_tabEditorsInfo.tabCtrlWinHandle);
+    if (currentTab > 0) {
+        moveTabWithEditor(&g_tabEditorsInfo, currentTab, 0);
+    }
+}
+
+void selectedTabToLeft() {
+    int currentTab = TabCtrl_GetCurSel(g_tabEditorsInfo.tabCtrlWinHandle);
+    int newTabItemsCount = TabCtrl_GetItemCount(g_tabEditorsInfo.tabCtrlWinHandle);
+    if (currentTab > 0) {
+        moveTabWithEditor(&g_tabEditorsInfo, currentTab, currentTab - 1);
+    }
+}
+
 wchar_t* getFilenameForTabItem(HWND tabCtrlWinHandle, int i) {
     TCCUSTOMITEM tabCtrlItemInfo;
 
@@ -782,8 +856,15 @@ LRESULT processTabNotification(HWND tabCtrlWinHandle, HMENU tabMenuHandle, HWND 
                 ScreenToClient(tabCtrlWinHandle, &cursorPos);
                 tabControlHitTestInfo.pt = cursorPos;
                 int tabIndex = TabCtrl_HitTest(tabCtrlWinHandle, &tabControlHitTestInfo);
+                int numTabs = TabCtrl_GetItemCount(tabCtrlWinHandle);
 
                 selectTab(tabCtrlWinHandle, tabIndex);
+
+                // enabling/disabling popup menu entries depending on number of tabs and index of selected tab
+                EnableMenuItem(tabMenuHandle, ID_TAB_MOVETOLEFT, !(tabIndex > 0));
+                EnableMenuItem(tabMenuHandle, ID_TAB_MOVETOLEFTMOST, !(tabIndex > 0));
+                EnableMenuItem(tabMenuHandle, ID_TAB_MOVETORIGHT, !(tabIndex < (numTabs - 1)));
+                EnableMenuItem(tabMenuHandle, ID_TAB_MOVETORIGHTMOST, !(tabIndex < (numTabs - 1)));
 
                 TrackPopupMenu(tabMenuHandle, TPM_RIGHTBUTTON, absCursorPos.x, absCursorPos.y, 0, menuCommandProcessorWindowHandle, NULL);
 

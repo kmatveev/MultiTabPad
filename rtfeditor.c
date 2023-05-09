@@ -1,14 +1,19 @@
 #include <richedit.h>
 #include "editor.h"
 
+#define UNICODE
+#define _UNICODE
+
 DWORD CALLBACK saveCallback(DWORD dwCookie, LPBYTE byteBuffer, LONG bufferOffset, LONG* resultingBufferOffset);
 DWORD CALLBACK loadCallback(DWORD dwCookie, LPBYTE byteBuffer, LONG bufferOffset, LONG* resultingBufferOffset);
 
 void initEditor() {
     HINSTANCE richEditLibModuleHandle;
-    richEditLibModuleHandle = LoadLibraryW(L"RICHED32.DLL");
+    wchar_t* richEditLibName = L"Msftedit.dll"; // L"RICHED32.DLL"
+    richEditLibModuleHandle = LoadLibraryW(richEditLibName);
     if (!richEditLibModuleHandle) {
-        MessageBoxW(NULL, L"Error while starting application: could not load RICHED32.DLL", L"Note", MB_OK);
+        // MessageBoxW(NULL, L"Error while starting application: could not load RICHED32.DLL", L"Note", MB_OK);
+        MessageBoxW(NULL, L"Error while starting application: could not load Msftedit.dll", L"Note", MB_OK);
     }
 }
 
@@ -19,9 +24,10 @@ HWND createEditorWindow(HINSTANCE appModuleHandle, HWND parentWinHandle, int vis
     wchar_t buf[256];
 
     // ES_NOHIDESEL is important because without it selection will not be shown when "Find" dialog is active
-    DWORD richEditStyle = WS_CHILD | WS_BORDER | WS_HSCROLL | WS_VSCROLL | ES_NOHIDESEL | ES_AUTOVSCROLL | ES_MULTILINE | ES_SAVESEL | ES_SUNKEN;
+    DWORD richEditStyle = WS_CHILD | WS_BORDER | WS_HSCROLL | WS_VSCROLL | ES_NOHIDESEL | ES_MULTILINE | ES_SAVESEL | ES_DISABLENOSCROLL;
     richEditStyle = visible ? (richEditStyle | WS_VISIBLE) : richEditStyle;
-    editorWinHandle = CreateWindowExW(0L, L"RICHEDIT", L"", richEditStyle, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, parentWinHandle, NULL, appModuleHandle, NULL);
+    wchar_t* richEditWindowClassName = MSFTEDIT_CLASS; //   included from richedit.h. If using older richedit.dll, use RICHEDIT_CLASS
+    editorWinHandle = CreateWindowExW(0L, richEditWindowClassName, L"", richEditStyle, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, parentWinHandle, NULL, appModuleHandle, NULL);
 
     if (editorWinHandle == NULL) {
         // wsprintfW(buf, L"Error %d", GetLastError());

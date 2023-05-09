@@ -1,83 +1,156 @@
+// Microsoft Visual C++ generated resource script.
+//
 #include "resource.h"
-#include <winresrc.h>
+/////////////////////////////////////////////////////////////////////////////
+// Русский (Россия) resources
 
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_RUS)
+LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
+#pragma code_page(1251)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
 
 IDM_MAINMENU MENU
-{
-  POPUP "&File"
-  {
-    MENUITEM "&New",  ID_FILE_NEW
-    MENUITEM SEPARATOR
-    MENUITEM "&Open ...", ID_FILE_OPEN
-    MENUITEM "&Save ", ID_FILE_SAVE
-    MENUITEM "Save as ...", ID_FILE_SAVEAS
-    MENUITEM "&Close",  ID_FILE_CLOSE
-    MENUITEM SEPARATOR
-    MENUITEM "E&xit", ID_FILE_EXIT
-  }
-  POPUP "&Edit"
-  {
-    MENUITEM "&Undo...\tCtrl+Z", ID_EDIT_UNDO
-    MENUITEM SEPARATOR
-    MENUITEM "C&ut\tCtrl+X", ID_EDIT_CUT
-    MENUITEM "C&opy\tCtrl+C", ID_EDIT_COPY
-    MENUITEM "&Paste\tCtrl+V", ID_EDIT_PASTE
-    MENUITEM "&Delete\tCtrl+D", ID_EDIT_DELETE
-    MENUITEM SEPARATOR
-    MENUITEM "Select all\tCtrl+A", ID_EDIT_SELECTALL
-  }
-  POPUP "&Search"
-  {
-    MENUITEM "&Find ...\tCtrl+F", ID_SEARCH_FIND
-    MENUITEM "Find next\tF3", ID_SEARCH_FINDNEXT
-    MENUITEM "&Replace ...\tCtrl+H",  ID_SEARCH_REPLACE
-  }
-  POPUP "F&ormat"
-  {
-    MENUITEM "&Font ...", ID_FORMAT_FONT
-  }
-  POPUP "&Help"
-  {
-    MENUITEM "&About ...", ID_HELP_ABOUT
-  }
-  MENUITEM "X", ID_FILE_CLOSE, HELP
-}
-
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&New",                        ID_FILE_NEW
+        MENUITEM SEPARATOR
+        MENUITEM "&Open ...",                   ID_FILE_OPEN
+        MENUITEM "&Save ",                      ID_FILE_SAVE
+        MENUITEM "Save as ...",                 ID_FILE_SAVEAS
+        MENUITEM "&Close",                      ID_FILE_CLOSE
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                       ID_FILE_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Undo...\tCtrl+Z",            ID_EDIT_UNDO
+        MENUITEM SEPARATOR
+        MENUITEM "C&ut\tCtrl+X",                ID_EDIT_CUT
+        MENUITEM "C&opy\tCtrl+C",               ID_EDIT_COPY
+        MENUITEM "&Paste\tCtrl+V",              ID_EDIT_PASTE
+        MENUITEM "&Delete\tCtrl+D",             ID_EDIT_DELETE
+        MENUITEM SEPARATOR
+        MENUITEM "Select all\tCtrl+A",          ID_EDIT_SELECTALL
+    END
+    POPUP "&Search"
+    BEGIN
+        MENUITEM "&Find ...\tCtrl+F",           ID_SEARCH_FIND
+        MENUITEM "Find next\tF3",               ID_SEARCH_FINDNEXT
+        MENUITEM "&Replace ...\tCtrl+H",        ID_SEARCH_REPLACE
+    END
+    POPUP "F&ormat"
+    BEGIN
+        MENUITEM "&Font ...",                   ID_FORMAT_FONT
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About ...",                  ID_HELP_ABOUT
+    END
+    MENUITEM "X",                           ID_FILE_CLOSE, HELP
+END
 
 IDM_TABMENU MENU
-{
-  POPUP "Tab"
-  {
-    MENUITEM "Close",  ID_TAB_CLOSE
-  }
-}
-
-
-IDI_APP       ICON  "icons/imageres_148.ico"
-IDI_FILE      ICON  "icons/imageres_102.ico"
-
-
-STRINGTABLE DISCARDABLE 
 BEGIN
-    IDS_APP_TITLE "Multi tab pad app"
+    POPUP "Tab"
+    BEGIN
+        MENUITEM "Close",                       ID_TAB_CLOSE
+        MENUITEM SEPARATOR
+        MENUITEM "Move to left",                ID_TAB_MOVETOLEFT
+        MENUITEM "Move to right",               ID_TAB_MOVETORIGHT
+        MENUITEM "Move to leftmost",            ID_TAB_MOVETOLEFTMOST
+        MENUITEM "Move to rightmost",           ID_TAB_MOVETORIGHTMOST
+    END
 END
 
 
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
 
-MTPAD ACCELERATORS DISCARDABLE 
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_APP                 ICON                    "icons/imageres_148.ico"
+
+IDI_FILE                ICON                    "icons/imageres_102.ico"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+MTPAD ACCELERATORS
 BEGIN
-    VK_BACK,        ID_EDIT_UNDO,          VIRTKEY, ALT, NOINVERT
-    VK_DELETE,      ID_EDIT_CUT,           VIRTKEY, SHIFT, NOINVERT
-    VK_F3,          ID_SEARCH_FINDNEXT,    VIRTKEY, NOINVERT
-    VK_INSERT,      ID_EDIT_COPY,          VIRTKEY, CONTROL, NOINVERT
-    VK_INSERT,      ID_EDIT_PASTE,         VIRTKEY, SHIFT, NOINVERT
-    "^C",           ID_EDIT_COPY,          ASCII,  NOINVERT
-    "^F",           ID_SEARCH_FIND,        ASCII,  NOINVERT
-    "^N",           ID_FILE_NEW,           ASCII,  NOINVERT
-    "^O",           ID_FILE_OPEN,          ASCII,  NOINVERT
-    "^R",           ID_SEARCH_REPLACE,     ASCII,  NOINVERT
-    "^S",           ID_FILE_SAVE,          ASCII,  NOINVERT
-    "^V",           ID_EDIT_PASTE,         ASCII,  NOINVERT
-    "^X",           ID_EDIT_CUT,           ASCII,  NOINVERT
-    "^Z",           ID_EDIT_UNDO,          ASCII,  NOINVERT
+    VK_BACK,        ID_EDIT_UNDO,           VIRTKEY, ALT, NOINVERT
+    VK_DELETE,      ID_EDIT_CUT,            VIRTKEY, SHIFT, NOINVERT
+    VK_F3,          ID_SEARCH_FINDNEXT,     VIRTKEY, NOINVERT
+    VK_INSERT,      ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
+    VK_INSERT,      ID_EDIT_PASTE,          VIRTKEY, SHIFT, NOINVERT
+    "^C",           ID_EDIT_COPY,           ASCII,  NOINVERT
+    "^F",           ID_SEARCH_FIND,         ASCII,  NOINVERT
+    "^N",           ID_FILE_NEW,            ASCII,  NOINVERT
+    "^O",           ID_FILE_OPEN,           ASCII,  NOINVERT
+    "^R",           ID_SEARCH_REPLACE,      ASCII,  NOINVERT
+    "^S",           ID_FILE_SAVE,           ASCII,  NOINVERT
+    "^V",           ID_EDIT_PASTE,          ASCII,  NOINVERT
+    "^X",           ID_EDIT_CUT,            ASCII,  NOINVERT
+    "^Z",           ID_EDIT_UNDO,           ASCII,  NOINVERT
 END
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE           "Multi tab pad app"
+END
+
+#endif    // Русский (Россия) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+
